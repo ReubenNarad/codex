@@ -410,10 +410,6 @@ impl App<'_> {
                         }));
                     }
                 },
-                AppEvent::QueueTextAfterCompact(text) => match &mut self.app_state {
-                    AppState::Chat { widget } => widget.queue_text_after_compact(text),
-                    AppState::Onboarding { .. } => {}
-                },
                 AppEvent::OnboardingAuthComplete(result) => {
                     if let AppState::Onboarding { screen } = &mut self.app_state {
                         screen.on_auth_complete(result);
@@ -447,11 +443,10 @@ impl App<'_> {
                         widget.apply_file_search_result(query, matches);
                     }
                 }
-                AppEvent::QueueTextAfterCompact(text) => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.queue_text_after_compact(text);
-                    }
-                }
+                AppEvent::QueueTextAfterCompact(text) => match &mut self.app_state {
+                    AppState::Chat { widget } => widget.queue_text_after_compact(text),
+                    AppState::Onboarding { .. } => {}
+                },
             }
         }
         terminal.clear()?;

@@ -785,6 +785,13 @@ mod tests {
     use crate::bottom_pane::InputResult;
     use crate::bottom_pane::chat_composer::LARGE_PASTE_CHAR_THRESHOLD;
     use crate::bottom_pane::textarea::TextArea;
+    use crate::slash_command::SlashCommand;
+    use codex_core::protocol::TokenUsage;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::style::Color;
 
     #[test]
     fn test_current_at_token_basic_cases() {
@@ -1240,6 +1247,86 @@ mod tests {
                 (" and ".to_string(), 0),
             ]
         );
+    }
+
+    #[test]
+    fn auto_compact_queues_and_dispatches_compact() {
+        use crossterm::event::KeyCode;
+        use crossterm::event::KeyEvent;
+        use crossterm::event::KeyModifiers;
+        use std::sync::mpsc::TryRecvError;
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(true, sender, false, true);
+
+        // Simulate 0% remaining: used == context_window
+        let mut last = TokenUsage::default();
+        last.total_tokens = 100;
+        let total = TokenUsage::default();
+        composer.set_token_usage(total, last, Some(100));
+
+        composer.textarea.insert_str("hi");
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        matches!(result, InputResult::None);
+        assert!(composer.textarea.text().is_empty());
+
+        // Expect the queued text and then the compact command
+        match rx.try_recv() {
+            Ok(AppEvent::QueueTextAfterCompact(s)) => assert_eq!(s, "hi"),
+            _ => panic!("expected QueueTextAfterCompact"),
+        }
+        match rx.try_recv() {
+            Ok(AppEvent::DispatchCommand(cmd)) => assert_eq!(cmd, SlashCommand::Compact),
+            _ => panic!("expected DispatchCommand(Compact)"),
+        }
+        match rx.try_recv() {
+            Err(TryRecvError::Empty) => {}
+            _ => panic!("unexpected extra event"),
+        }
+    }
+
+    #[test]
+    fn context_left_red_when_below_20() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(true, sender, false, false);
+
+        // 15% remaining (85/100 used)
+        let mut last = TokenUsage::default();
+        last.total_tokens = 85;
+        let total = TokenUsage::default();
+        composer.set_token_usage(total, last, Some(100));
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 4)).expect("terminal");
+        terminal
+            .draw(|f| f.render_widget_ref(&composer, f.area()))
+            .expect("draw");
+
+        // Render into a buffer we can inspect
+        let area = Rect::new(0, 0, 80, 4);
+        let mut buf = Buffer::empty(area);
+        use ratatui::widgets::WidgetRef;
+        (&composer).render_ref(area, &mut buf);
+
+        let needle = "15% context left";
+        let mut found_red = false;
+        'outer: for y in 0..area.height {
+            let mut row = String::new();
+            for x in 0..area.width {
+                row.push(buf[(x, y)].symbol().chars().next().unwrap_or(' '));
+            }
+            if let Some(start) = row.find(needle) {
+                for i in 0..needle.len() as u16 {
+                    if buf[(start as u16 + i, y)].style().fg == Some(Color::Red) {
+                        found_red = true;
+                        break 'outer;
+                    }
+                }
+            }
+        }
+        assert!(found_red, "expected red fg on percent-left when below 20%");
     }
 
     #[test]
