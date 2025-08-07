@@ -53,4 +53,8 @@ pub(crate) enum AppEvent {
     /// Onboarding: result of login_with_chatgpt.
     OnboardingAuthComplete(Result<(), String>),
     OnboardingComplete(ChatWidgetArgs),
+
+    /// Queue a user text message to be automatically submitted after the
+    /// current compaction completes (used by --auto-compact flow).
+    QueueTextAfterCompact(String),
 }

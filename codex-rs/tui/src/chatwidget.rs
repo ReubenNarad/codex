@@ -79,6 +79,8 @@ pub(crate) struct ChatWidget<'a> {
     current_stream: Option<StreamKind>,
     stream_header_emitted: bool,
     live_max_rows: u16,
+    auto_compact: bool,
+    pending_text_after_compact: Option<String>,
 }
 
 struct UserMessage {
@@ -161,6 +163,7 @@ impl ChatWidget<'_> {
         initial_prompt: Option<String>,
         initial_images: Vec<PathBuf>,
         enhanced_keys_supported: bool,
+        auto_compact: bool,
     ) -> Self {
         let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
@@ -207,6 +210,7 @@ impl ChatWidget<'_> {
                 app_event_tx,
                 has_input_focus: true,
                 enhanced_keys_supported,
+                auto_compact,
             }),
             active_history_cell: None,
             config,
@@ -224,6 +228,8 @@ impl ChatWidget<'_> {
             current_stream: None,
             stream_header_emitted: false,
             live_max_rows: 3,
+            auto_compact,
+            pending_text_after_compact: None,
         }
     }
 
@@ -364,6 +370,10 @@ impl ChatWidget<'_> {
             }) => {
                 self.bottom_pane.set_task_running(false);
                 self.bottom_pane.clear_live_ring();
+                if let Some(text) = self.pending_text_after_compact.take() {
+                    // After compact completes, immediately submit the queued message.
+                    self.submit_text_message(text);
+                }
                 self.request_redraw();
             }
             EventMsg::TokenCount(token_usage) => {
@@ -622,11 +632,16 @@ impl ChatWidget<'_> {
 
     pub(crate) fn clear_token_usage(&mut self) {
         self.total_token_usage = TokenUsage::default();
+        self.last_token_usage = TokenUsage::default();
         self.bottom_pane.set_token_usage(
             self.total_token_usage.clone(),
             self.last_token_usage.clone(),
             self.config.model_context_window,
         );
+    }
+
+    pub(crate) fn queue_text_after_compact(&mut self, text: String) {
+        self.pending_text_after_compact = Some(text);
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {

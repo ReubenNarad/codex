@@ -23,6 +23,7 @@ use ratatui::widgets::WidgetRef;
 use super::chat_composer_history::ChatComposerHistory;
 use super::command_popup::CommandPopup;
 use super::file_search_popup::FileSearchPopup;
+use crate::slash_command::SlashCommand;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -61,6 +62,7 @@ pub(crate) struct ChatComposer {
     pending_pastes: Vec<(String, String)>,
     token_usage_info: Option<TokenUsageInfo>,
     has_focus: bool,
+    auto_compact: bool,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -75,6 +77,7 @@ impl ChatComposer {
         has_input_focus: bool,
         app_event_tx: AppEventSender,
         enhanced_keys_supported: bool,
+        auto_compact: bool,
     ) -> Self {
         let use_shift_enter_hint = enhanced_keys_supported;
 
@@ -91,6 +94,7 @@ impl ChatComposer {
             pending_pastes: Vec::new(),
             token_usage_info: None,
             has_focus: has_input_focus,
+            auto_compact,
         }
     }
 
@@ -502,16 +506,35 @@ impl ChatComposer {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
+                // Prepare text and resolve any large-paste placeholders.
                 let mut text = self.textarea.text().to_string();
                 self.textarea.set_text("");
-
-                // Replace all pending pastes in the text
                 for (placeholder, actual) in &self.pending_pastes {
                     if text.contains(placeholder) {
                         text = text.replace(placeholder, actual);
                     }
                 }
                 self.pending_pastes.clear();
+
+                // Auto-compact: if enabled and 0% remaining, queue text and dispatch /compact.
+                if self.auto_compact {
+                    if let Some(info) = &self.token_usage_info {
+                        if let Some(context_window) = info.model_context_window {
+                            if context_window > 0 {
+                                let used = info.last_token_usage.total_tokens;
+                                if used >= context_window {
+                                    if !text.is_empty() {
+                                        self.app_event_tx
+                                            .send(AppEvent::QueueTextAfterCompact(text.clone()));
+                                    }
+                                    self.app_event_tx
+                                        .send(AppEvent::DispatchCommand(SlashCommand::Compact));
+                                    return (InputResult::None, true);
+                                }
+                            }
+                        }
+                    }
+                }
 
                 if text.is_empty() {
                     (InputResult::None, true)
@@ -712,10 +735,13 @@ impl WidgetRef for &ChatComposer {
                             100
                         };
                         hint.push(Span::from("   "));
-                        hint.push(
-                            Span::from(format!("{percent_remaining}% context left"))
-                                .style(Style::default().add_modifier(Modifier::DIM)),
-                        );
+                        let mut span = Span::from(format!("{percent_remaining}% context left"));
+                        if percent_remaining < 20 {
+                            span = span.style(Style::default().fg(Color::Red));
+                        } else {
+                            span = span.style(Style::default().add_modifier(Modifier::DIM));
+                        }
+                        hint.push(span);
                     }
                 }
 
@@ -917,7 +943,7 @@ mod tests {
 
         let (tx, _rx) = std::sync::mpsc::channel();
         let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(true, sender, false);
+        let mut composer = ChatComposer::new(true, sender, false, false);
 
         let needs_redraw = composer.handle_paste("hello".to_string());
         assert!(needs_redraw);
@@ -940,7 +966,7 @@ mod tests {
 
         let (tx, _rx) = std::sync::mpsc::channel();
         let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(true, sender, false);
+        let mut composer = ChatComposer::new(true, sender, false, false);
 
         let large = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 10);
         let needs_redraw = composer.handle_paste(large.clone());
@@ -969,7 +995,7 @@ mod tests {
         let large = "y".repeat(LARGE_PASTE_CHAR_THRESHOLD + 1);
         let (tx, _rx) = std::sync::mpsc::channel();
         let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(true, sender, false);
+        let mut composer = ChatComposer::new(true, sender, false, false);
 
         composer.handle_paste(large);
         assert_eq!(composer.pending_pastes.len(), 1);
@@ -1005,7 +1031,7 @@ mod tests {
 
         for (name, input) in test_cases {
             // Create a fresh composer for each test case
-            let mut composer = ChatComposer::new(true, sender.clone(), false);
+            let mut composer = ChatComposer::new(true, sender.clone(), false, false);
 
             if let Some(text) = input {
                 composer.handle_paste(text);
@@ -1043,7 +1069,7 @@ mod tests {
 
         let (tx, rx) = std::sync::mpsc::channel();
         let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(true, sender, false);
+        let mut composer = ChatComposer::new(true, sender, false, false);
 
         // Type the slash command.
         for ch in [
@@ -1085,7 +1111,7 @@ mod tests {
 
         let (tx, _rx) = std::sync::mpsc::channel();
         let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(true, sender, false);
+        let mut composer = ChatComposer::new(true, sender, false, false);
 
         // Define test cases: (paste content, is_large)
         let test_cases = [
@@ -1158,7 +1184,7 @@ mod tests {
 
         let (tx, _rx) = std::sync::mpsc::channel();
         let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(true, sender, false);
+        let mut composer = ChatComposer::new(true, sender, false, false);
 
         // Define test cases: (content, is_large)
         let test_cases = [
@@ -1224,7 +1250,7 @@ mod tests {
 
         let (tx, _rx) = std::sync::mpsc::channel();
         let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(true, sender, false);
+        let mut composer = ChatComposer::new(true, sender, false, false);
 
         // Define test cases: (cursor_position_from_end, expected_pending_count)
         let test_cases = [

@@ -64,6 +64,8 @@ pub(crate) struct App<'a> {
     pending_history_lines: Vec<Line<'static>>,
 
     enhanced_keys_supported: bool,
+
+    auto_compact: bool,
 }
 
 /// Aggregate parameters needed to create a `ChatWidget`, as creation may be
@@ -74,6 +76,7 @@ pub(crate) struct ChatWidgetArgs {
     initial_prompt: Option<String>,
     initial_images: Vec<PathBuf>,
     enhanced_keys_supported: bool,
+    auto_compact: bool,
 }
 
 impl App<'_> {
@@ -82,6 +85,7 @@ impl App<'_> {
         initial_prompt: Option<String>,
         initial_images: Vec<std::path::PathBuf>,
         show_trust_screen: bool,
+        auto_compact: bool,
     ) -> Self {
         let (app_event_tx, app_event_rx) = channel();
         let app_event_tx = AppEventSender::new(app_event_tx);
@@ -139,6 +143,7 @@ impl App<'_> {
                 initial_prompt,
                 initial_images,
                 enhanced_keys_supported,
+                auto_compact,
             };
             AppState::Onboarding {
                 screen: OnboardingScreen::new(OnboardingScreenArgs {
@@ -157,6 +162,7 @@ impl App<'_> {
                 initial_prompt,
                 initial_images,
                 enhanced_keys_supported,
+                auto_compact,
             );
             AppState::Chat {
                 widget: Box::new(chat_widget),
@@ -173,6 +179,7 @@ impl App<'_> {
             file_search,
             pending_redraw,
             enhanced_keys_supported,
+            auto_compact,
         }
     }
 
@@ -305,6 +312,7 @@ impl App<'_> {
                             None,
                             Vec::new(),
                             self.enhanced_keys_supported,
+                            self.auto_compact,
                         ));
                         self.app_state = AppState::Chat { widget: new_widget };
                         self.app_event_tx.send(AppEvent::RequestRedraw);
@@ -402,6 +410,10 @@ impl App<'_> {
                         }));
                     }
                 },
+                AppEvent::QueueTextAfterCompact(text) => match &mut self.app_state {
+                    AppState::Chat { widget } => widget.queue_text_after_compact(text),
+                    AppState::Onboarding { .. } => {}
+                },
                 AppEvent::OnboardingAuthComplete(result) => {
                     if let AppState::Onboarding { screen } = &mut self.app_state {
                         screen.on_auth_complete(result);
@@ -412,6 +424,7 @@ impl App<'_> {
                     enhanced_keys_supported,
                     initial_images,
                     initial_prompt,
+                    auto_compact,
                 }) => {
                     self.app_state = AppState::Chat {
                         widget: Box::new(ChatWidget::new(
@@ -420,6 +433,7 @@ impl App<'_> {
                             initial_prompt,
                             initial_images,
                             enhanced_keys_supported,
+                            auto_compact,
                         )),
                     }
                 }
@@ -431,6 +445,11 @@ impl App<'_> {
                 AppEvent::FileSearchResult { query, matches } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.apply_file_search_result(query, matches);
+                    }
+                }
+                AppEvent::QueueTextAfterCompact(text) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.queue_text_after_compact(text);
                     }
                 }
             }

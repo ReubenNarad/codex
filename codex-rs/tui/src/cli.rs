@@ -23,6 +23,10 @@ pub struct Cli {
     #[arg(long = "oss", default_value_t = false)]
     pub oss: bool,
 
+    /// Automatically run /compact when sending with 0% context remaining.
+    #[arg(long = "auto-compact", default_value_t = false)]
+    pub auto_compact: bool,
+
     /// Configuration profile from config.toml to specify default options.
     #[arg(long = "profile", short = 'p')]
     pub config_profile: Option<String>,
