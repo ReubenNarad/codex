@@ -1154,6 +1154,7 @@ async fn submission_loop(
                 model,
                 effort,
                 summary,
+                include_web_search_request,
             } => {
                 // attempt to inject input into current task
                 if let Err(items) = sess.inject_input(items) {
@@ -1192,7 +1193,8 @@ async fn submission_loop(
                             sandbox_policy: sandbox_policy.clone(),
                             include_plan_tool: config.include_plan_tool,
                             include_apply_patch_tool: config.include_apply_patch_tool,
-                            include_web_search_request: config.tools_web_search_request,
+                            include_web_search_request: include_web_search_request
+                                .unwrap_or(config.tools_web_search_request),
                             use_streamable_shell_tool: config
                                 .use_experimental_streamable_shell_tool,
                             include_view_image_tool: config.include_view_image_tool,

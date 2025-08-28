@@ -76,6 +76,11 @@ pub enum Op {
 
         /// Will only be honored if the model is configured to use reasoning.
         summary: ReasoningSummaryConfig,
+
+        /// Optional per‑turn override to include the native `web_search` tool
+        /// in this turn only (does not persist to subsequent turns).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        include_web_search_request: Option<bool>,
     },
 
     /// Override parts of the persistent turn context for subsequent turns.

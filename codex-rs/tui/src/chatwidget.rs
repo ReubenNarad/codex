@@ -799,6 +799,10 @@ impl ChatWidget {
             SlashCommand::Mention => {
                 self.insert_str("@");
             }
+            SlashCommand::Search => {
+                // Seed the composer with the command so the user can type the query.
+                self.insert_str("/search ");
+            }
             SlashCommand::Status => {
                 self.add_status_output();
             }
@@ -878,8 +882,30 @@ impl ChatWidget {
         let UserMessage { text, image_paths } = user_message;
         let mut items: Vec<InputItem> = Vec::new();
 
-        if !text.is_empty() {
-            items.push(InputItem::Text { text: text.clone() });
+        // Intercept "/search <query>" to enable web search for this turn only.
+        let trimmed = text.trim().to_string();
+        let is_slash_search = trimmed.starts_with("/search");
+        let mut per_turn_search: bool = false;
+        let mut effective_text = text.clone();
+
+        if is_slash_search {
+            // Extract the query after the command keyword.
+            let after = trimmed["/search".len()..].trim();
+            if after.is_empty() {
+                // Provide a friendly error and ignore submission.
+                self.add_to_history(history_cell::new_error_event(
+                    "Usage: /search <query>".to_string(),
+                ));
+                return;
+            }
+            per_turn_search = true;
+            effective_text = after.to_string();
+        }
+
+        if !effective_text.is_empty() {
+            items.push(InputItem::Text {
+                text: effective_text.clone(),
+            });
         }
 
         for path in image_paths {
@@ -890,24 +916,45 @@ impl ChatWidget {
             return;
         }
 
-        self.codex_op_tx
-            .send(Op::UserInput { items })
-            .unwrap_or_else(|e| {
-                tracing::error!("failed to send message: {e}");
+        if per_turn_search {
+            // Send as a one-off turn with the current runtime settings and web search enabled.
+            let cfg = &self.config;
+            let op = Op::UserTurn {
+                items,
+                cwd: cfg.cwd.clone(),
+                approval_policy: cfg.approval_policy,
+                sandbox_policy: cfg.sandbox_policy.clone(),
+                model: cfg.model.clone(),
+                effort: cfg.model_reasoning_effort,
+                summary: cfg.model_reasoning_summary,
+                include_web_search_request: Some(true),
+            };
+            self.codex_op_tx.send(op).unwrap_or_else(|e| {
+                tracing::error!("failed to send per-turn search message: {e}");
             });
-
-        // Persist the text to cross-session message history.
-        if !text.is_empty() {
+        } else {
+            // Regular turn – forward as-is.
             self.codex_op_tx
-                .send(Op::AddToHistory { text: text.clone() })
+                .send(Op::UserInput { items })
+                .unwrap_or_else(|e| {
+                    tracing::error!("failed to send message: {e}");
+                });
+        }
+
+        // Persist the user-visible text to cross-session history.
+        if !effective_text.is_empty() {
+            self.codex_op_tx
+                .send(Op::AddToHistory {
+                    text: effective_text.clone(),
+                })
                 .unwrap_or_else(|e| {
                     tracing::error!("failed to send AddHistory op: {e}");
                 });
         }
 
-        // Only show the text portion in conversation history.
-        if !text.is_empty() {
-            self.add_to_history(history_cell::new_user_prompt(text.clone()));
+        // Only show the effective text portion in conversation history.
+        if !effective_text.is_empty() {
+            self.add_to_history(history_cell::new_user_prompt(effective_text));
         }
     }
 

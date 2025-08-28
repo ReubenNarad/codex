@@ -521,6 +521,7 @@ async fn per_turn_overrides_keep_cached_prefix_and_key_constant() {
             model: "o3".to_string(),
             effort: ReasoningEffort::High,
             summary: ReasoningSummary::Detailed,
+            include_web_search_request: None,
         })
         .await
         .unwrap();

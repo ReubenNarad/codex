@@ -385,20 +385,26 @@ impl ChatComposer {
                 }
                 (InputResult::None, true)
             }
-            KeyEvent {
-                code: KeyCode::Enter,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
+            KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, .. } => {
                 if let Some(cmd) = popup.selected_command() {
-                    // Clear textarea so no residual text remains.
+                    // Special-case commands that expect additional inline arguments.
+                    // For "/search <query>", treat Enter as a normal submit when a query exists
+                    // instead of dispatching the bare command.
+                    if matches!(*cmd, crate::slash_command::SlashCommand::Search) {
+                        let first_line = self.textarea.text().lines().next().unwrap_or("");
+                        if first_line.trim_start().starts_with("/search") {
+                            let tail = first_line["/search".len()..].trim();
+                            if !tail.is_empty() {
+                                // Submit the full text as user input.
+                                return self.handle_key_event_without_popup(key_event);
+                            }
+                        }
+                    }
+
+                    // Default behavior: dispatch the selected command immediately.
                     self.textarea.set_text("");
-
                     let result = (InputResult::Command(*cmd), true);
-
-                    // Hide popup since the command has been dispatched.
                     self.active_popup = ActivePopup::None;
-
                     return result;
                 }
                 // Fallback to default newline handling if no command selected.

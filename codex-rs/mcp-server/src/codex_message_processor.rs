@@ -539,6 +539,7 @@ impl CodexMessageProcessor {
                 model,
                 effort,
                 summary,
+                include_web_search_request: None,
             })
             .await;
 
