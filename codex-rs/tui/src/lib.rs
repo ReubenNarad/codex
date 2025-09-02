@@ -34,7 +34,6 @@ mod chatwidget;
 mod citation_regex;
 mod cli;
 mod clipboard_paste;
-mod common;
 pub mod custom_terminal;
 mod diff_render;
 mod exec_command;
@@ -64,8 +63,6 @@ mod chatwidget_stream_tests;
 
 #[cfg(not(debug_assertions))]
 mod updates;
-#[cfg(not(debug_assertions))]
-use color_eyre::owo_colors::OwoColorize;
 
 pub use cli::Cli;
 
@@ -128,6 +125,7 @@ pub async fn run_main(
         base_instructions: None,
         include_plan_tool: Some(true),
         include_apply_patch_tool: None,
+        include_view_image_tool: None,
         disable_response_storage: cli.oss.then_some(true),
         show_raw_agent_reasoning: cli.oss.then_some(true),
         tools_web_search_request: cli.web_search.then_some(true),
